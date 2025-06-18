@@ -1,0 +1,69 @@
+[17-Jun-2025 21:42:04 UTC] License API Request: {"method":"GET","action":"","user_agent":"Mozilla\/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit\/537.36 (KHTML, like Gecko) Chrome\/137.0.0.0 Safari\/537.36","ip":"181.51.34.85","params":[]}
+[17-Jun-2025 23:43:25 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[17-Jun-2025 23:43:32 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[17-Jun-2025 23:48:47 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[17-Jun-2025 23:51:03 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[17-Jun-2025 23:51:24 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[17-Jun-2025 23:52:24 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[17-Jun-2025 23:53:45 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[17-Jun-2025 23:55:05 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[17-Jun-2025 23:57:53 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[17-Jun-2025 23:58:50 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 00:05:02 UTC] License API Request: {"method":"GET","action":"","user_agent":"Mozilla\/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit\/537.36 (KHTML, like Gecko) Chrome\/137.0.0.0 Safari\/537.36","ip":"181.51.34.85","params":[]}
+[18-Jun-2025 00:10:23 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 00:13:37 UTC] License API Request: {"method":"GET","action":"status","user_agent":"License-Checker-Diagnostic-Tool\/1.0","ip":"198.251.83.106","params":{"action":"status"}}
+[18-Jun-2025 00:17:06 UTC] License API Request: {"method":"POST","action":"","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 00:17:23 UTC] License API Request: {"method":"POST","action":"","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 00:18:02 UTC] License API Request: {"method":"POST","action":"","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 00:18:10 UTC] License API Request: {"method":"POST","action":"","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 00:21:29 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 00:21:53 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 00:22:46 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 00:25:02 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 00:26:09 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 00:37:30 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 00:38:34 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 00:55:46 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 01:02:08 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 01:02:19 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 01:02:25 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 01:06:18 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 01:20:32 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 01:20:32 UTC] PHP Notice:  Only variables should be passed by reference in /home/serverbussn/scode.warsup.shop/api.php on line 228
+[18-Jun-2025 01:20:32 UTC] License API Request: {"method":"POST","action":"verify","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 01:35:00 UTC] License API Request: {"method":"HEAD","action":"","user_agent":"","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 01:35:43 UTC] License API Request: {"method":"HEAD","action":"","user_agent":"","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 01:35:43 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 01:35:43 UTC] PHP Notice:  Only variables should be passed by reference in /home/serverbussn/scode.warsup.shop/api.php on line 203
+[18-Jun-2025 01:35:43 UTC] License API Request: {"method":"POST","action":"verify","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 01:39:51 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 01:39:51 UTC] PHP Notice:  Only variables should be passed by reference in /home/serverbussn/scode.warsup.shop/api.php on line 203
+[18-Jun-2025 01:55:53 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 01:55:53 UTC] PHP Notice:  Only variables should be passed by reference in /home/serverbussn/scode.warsup.shop/api.php on line 228
+[18-Jun-2025 01:55:54 UTC] License API Request: {"method":"POST","action":"verify","user_agent":"LicenseClient\/1.0","ip":"198.251.83.106","params":[]}
+[18-Jun-2025 02:18:47 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"License-Client\/2.0","ip":"198.251.83.106","params":{"action":"activate","license_key":"LCSY-10FR-77F8-7350-4D36-9FD5-F1AC-F7D9","domain":"streamdigi.warsup.shop","ip":"198.251.83.106","software":"Sistema de C\u00f3digos","version":"2.0"}}
+[18-Jun-2025 02:18:47 UTC] PHP Notice:  Only variables should be passed by reference in /home/serverbussn/scode.warsup.shop/api.php on line 203
+[18-Jun-2025 02:53:01 UTC] License API Request: {"method":"POST","action":"activate","user_agent":"License-Client\/2.0","ip":"198.251.83.106","params":{"action":"activate","license_key":"LCSY-16NY-4F2C-9DC9-9DC1-E776-650D-F000","domain":"streamdigi.warsup.shop","ip":"198.251.83.106","software":"Sistema de C\u00f3digos","version":"2.0"}}
+[18-Jun-2025 02:53:01 UTC] PHP Notice:  Only variables should be passed by reference in /home/serverbussn/scode.warsup.shop/api.php on line 228
+[18-Jun-2025 03:35:24 UTC] PHP Warning:  require_once(license_admin_panel.php): Failed to open stream: No such file or directory in /home/serverbussn/scode.warsup.shop/generador_masivo_de_licencias.php on line 8
+[18-Jun-2025 03:35:24 UTC] PHP Fatal error:  Uncaught Error: Failed opening required 'license_admin_panel.php' (include_path='.:/opt/alt/php82/usr/share/pear:/opt/alt/php82/usr/share/php:/usr/share/pear:/usr/share/php') in /home/serverbussn/scode.warsup.shop/generador_masivo_de_licencias.php:8
+Stack trace:
+#0 {main}
+  thrown in /home/serverbussn/scode.warsup.shop/generador_masivo_de_licencias.php on line 8
+[18-Jun-2025 03:35:28 UTC] License API Request: {"method":"GET","action":"","user_agent":"Mozilla\/5.0 (iPhone; CPU iPhone OS 18_3_1 like Mac OS X) AppleWebKit\/605.1.15 (KHTML, like Gecko) Mobile\/15E148 THDConsumer\/7.45.0.1 (iPhone;iOS 18.3.1)DID:","ip":"128.90.117.44","params":[]}
+[18-Jun-2025 03:35:30 UTC] PHP Warning:  require_once(license_admin_panel.php): Failed to open stream: No such file or directory in /home/serverbussn/scode.warsup.shop/generador_masivo_de_licencias.php on line 8
+[18-Jun-2025 03:35:30 UTC] PHP Fatal error:  Uncaught Error: Failed opening required 'license_admin_panel.php' (include_path='.:/opt/alt/php82/usr/share/pear:/opt/alt/php82/usr/share/php:/usr/share/pear:/usr/share/php') in /home/serverbussn/scode.warsup.shop/generador_masivo_de_licencias.php:8
+Stack trace:
+#0 {main}
+  thrown in /home/serverbussn/scode.warsup.shop/generador_masivo_de_licencias.php on line 8
+[18-Jun-2025 03:35:31 UTC] License API Request: {"method":"GET","action":"","user_agent":"Mozilla\/5.0 (iPhone; CPU iPhone OS 18_3_1 like Mac OS X) AppleWebKit\/605.1.15 (KHTML, like Gecko) Mobile\/15E148 THDConsumer\/7.45.0.1 (iPhone;iOS 18.3.1)DID:","ip":"156.244.39.96","params":[]}
+[18-Jun-2025 03:35:45 UTC] PHP Warning:  require_once(license_admin_panel.php): Failed to open stream: No such file or directory in /home/serverbussn/scode.warsup.shop/generador_masivo_de_licencias.php on line 8
+[18-Jun-2025 03:35:45 UTC] PHP Fatal error:  Uncaught Error: Failed opening required 'license_admin_panel.php' (include_path='.:/opt/alt/php82/usr/share/pear:/opt/alt/php82/usr/share/php:/usr/share/pear:/usr/share/php') in /home/serverbussn/scode.warsup.shop/generador_masivo_de_licencias.php:8
+Stack trace:
+#0 {main}
+  thrown in /home/serverbussn/scode.warsup.shop/generador_masivo_de_licencias.php on line 8
+[18-Jun-2025 03:36:14 UTC] PHP Warning:  require_once(license_admin_panel.php): Failed to open stream: No such file or directory in /home/serverbussn/scode.warsup.shop/generador_masivo_de_licencias.php on line 8
+[18-Jun-2025 03:36:14 UTC] PHP Fatal error:  Uncaught Error: Failed opening required 'license_admin_panel.php' (include_path='.:/opt/alt/php82/usr/share/pear:/opt/alt/php82/usr/share/php:/usr/share/pear:/usr/share/php') in /home/serverbussn/scode.warsup.shop/generador_masivo_de_licencias.php:8
+Stack trace:
+#0 {main}
+  thrown in /home/serverbussn/scode.warsup.shop/generador_masivo_de_licencias.php on line 8
