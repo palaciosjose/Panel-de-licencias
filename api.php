@@ -269,6 +269,17 @@ class LicenseAPI {
         
         if ($stmt->execute()) {
             $activation_id = $this->conn->insert_id;
+            
+                if (isset($this->whatsapp_config)) {
+                    $this->sendWhatsAppNotification('license_activated', [
+                        'client_name' => $license['client_name'],
+                        'client_phone' => $license['client_phone'],
+                        'license_key' => $license_key,
+                        'domain' => $domain,
+                        'expires_at' => $license['expires_at']
+                    ]);
+                }
+            
             $this->logActivity($license['id'], $activation_id, 'activation', 'success', 'License activated for domain: ' . $domain);
             
             $this->sendSuccess([

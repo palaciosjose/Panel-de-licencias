@@ -14,6 +14,8 @@ $license_db_config = [
     'database' => 'serverbussn_sdcode'
 ];
 
+require_once 'whatsapp_config.php';
+
 // Clase para manejar el sistema de licencias
 class LicenseManager {
     private $conn;
@@ -304,7 +306,7 @@ class LicenseManager {
 }
 
 // Inicializar el gestor de licencias
-$licenseManager = new LicenseManager($license_db_config);
+$licenseManager = new LicenseManager($license_db_config, $whatsapp_config);
 
 // Manejar logout
 if (isset($_GET['logout'])) {

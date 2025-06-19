@@ -28,9 +28,10 @@ $license_db_config = [
 
 // Incluir la clase LicenseManager desde su archivo separado
 require_once 'LicenseManager.class.php';
+require_once 'whatsapp_config.php';
 
 try {
-    $licenseManager = new LicenseManager($license_db_config);
+    $licenseManager = new LicenseManager($license_db_config, $whatsapp_config);
 } catch (Exception $e) {
     // Si falla la conexión a la DB, devolver error JSON
     echo json_encode(['success' => false, 'error' => 'Error de conexión a la base de datos.', 'code' => 500]);
