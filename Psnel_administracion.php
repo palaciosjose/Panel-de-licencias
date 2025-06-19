@@ -1,7 +1,7 @@
 <?php
 /**
  * Panel de Administración del Servidor de Licencias
- * Version: 1.0
+ * Version: 1.1 - Con teléfono y sistema de períodos
  */
 
 session_start();
@@ -75,22 +75,34 @@ class LicenseManager {
     
     public function createLicense($data) {
         $license_key = $this->generateLicenseKey();
-        $expires_at = !empty($data['expires_at']) ? $data['expires_at'] : null;
+        
+        // Calcular fecha de vencimiento automáticamente
+        $start_date = !empty($data['start_date']) ? $data['start_date'] : date('Y-m-d H:i:s');
+        $duration_days = !empty($data['duration_days']) ? (int)$data['duration_days'] : null;
+        $expires_at = null;
+        
+        if ($duration_days && $duration_days > 0) {
+            $start_timestamp = strtotime($start_date);
+            $expires_at = date('Y-m-d H:i:s', $start_timestamp + ($duration_days * 24 * 3600));
+        }
         
         $stmt = $this->conn->prepare("
-            INSERT INTO licenses (license_key, client_name, client_email, product_name, version, 
-                                license_type, max_domains, expires_at, notes) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO licenses (license_key, client_name, client_email, client_phone, product_name, version, 
+                                license_type, max_domains, start_date, duration_days, expires_at, notes) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
         
-        $stmt->bind_param("ssssssiss", 
+        $stmt->bind_param("sssssssissss", 
             $license_key,
             $data['client_name'],
-            $data['client_email'], 
+            $data['client_email'],
+            $data['client_phone'],
             $data['product_name'],
             $data['version'],
             $data['license_type'],
             $data['max_domains'],
+            $start_date,
+            $duration_days,
             $expires_at,
             $data['notes']
         );
@@ -99,7 +111,9 @@ class LicenseManager {
             return [
                 'success' => true,
                 'license_id' => $this->conn->insert_id,
-                'license_key' => $license_key
+                'license_key' => $license_key,
+                'start_date' => $start_date,
+                'expires_at' => $expires_at
             ];
         }
         
@@ -112,16 +126,26 @@ class LicenseManager {
         $types = '';
         
         if (!empty($search)) {
-            $where_clause = "WHERE l.client_name LIKE ? OR l.client_email LIKE ? OR l.license_key LIKE ?";
+            $where_clause = "WHERE l.client_name LIKE ? OR l.client_email LIKE ? OR l.client_phone LIKE ? OR l.license_key LIKE ?";
             $search_param = "%{$search}%";
-            $params = [$search_param, $search_param, $search_param];
-            $types = 'sss';
+            $params = [$search_param, $search_param, $search_param, $search_param];
+            $types = 'ssss';
         }
         
         $sql = "
             SELECT l.*, 
                    COUNT(la.id) as activations_count,
-                   COUNT(CASE WHEN la.status = 'active' THEN 1 END) as active_activations
+                   COUNT(CASE WHEN la.status = 'active' THEN 1 END) as active_activations,
+                   CASE 
+                       WHEN l.expires_at IS NULL THEN 'permanent'
+                       WHEN l.expires_at > NOW() THEN 'active'
+                       ELSE 'expired'
+                   END as calculated_status,
+                   CASE 
+                       WHEN l.expires_at IS NOT NULL AND l.expires_at > NOW() 
+                       THEN DATEDIFF(l.expires_at, NOW()) 
+                       ELSE 0 
+                   END as days_remaining
             FROM licenses l
             LEFT JOIN license_activations la ON l.id = la.license_id
             {$where_clause}
@@ -152,7 +176,7 @@ class LicenseManager {
         $where_clause = $license_id ? "WHERE la.license_id = ?" : "";
         
         $sql = "
-            SELECT la.*, l.client_name, l.license_key
+            SELECT la.*, l.client_name, l.client_phone, l.license_key
             FROM license_activations la
             JOIN licenses l ON la.license_id = l.id
             {$where_clause}
@@ -175,6 +199,72 @@ class LicenseManager {
         return $stmt->execute();
     }
     
+    public function getLicenseById($license_id) {
+        $stmt = $this->conn->prepare("SELECT * FROM licenses WHERE id = ?");
+        $stmt->bind_param("i", $license_id);
+        $stmt->execute();
+        return $stmt->get_result()->fetch_assoc();
+    }
+    
+    public function updateLicense($license_id, $data) {
+        // Calcular fecha de vencimiento automáticamente
+        $start_date = !empty($data['start_date']) ? $data['start_date'] : date('Y-m-d H:i:s');
+        $duration_days = !empty($data['duration_days']) ? (int)$data['duration_days'] : null;
+        $expires_at = null;
+        
+        if ($duration_days && $duration_days > 0) {
+            $start_timestamp = strtotime($start_date);
+            $expires_at = date('Y-m-d H:i:s', $start_timestamp + ($duration_days * 24 * 3600));
+        }
+        
+        $stmt = $this->conn->prepare("
+            UPDATE licenses SET 
+                client_name = ?, client_email = ?, client_phone = ?, 
+                product_name = ?, version = ?, license_type = ?, max_domains = ?, 
+                start_date = ?, duration_days = ?, expires_at = ?, 
+                status = ?, notes = ?
+            WHERE id = ?
+        ");
+        
+        $stmt->bind_param("ssssssisssssi", 
+            $data['client_name'],
+            $data['client_email'],
+            $data['client_phone'],
+            $data['product_name'],
+            $data['version'],
+            $data['license_type'],
+            $data['max_domains'],
+            $start_date,
+            $duration_days,
+            $expires_at,
+            $data['status'],
+            $data['notes'],
+            $license_id
+        );
+        
+        if ($stmt->execute()) {
+            return [
+                'success' => true,
+                'start_date' => $start_date,
+                'expires_at' => $expires_at
+            ];
+        }
+        
+        return ['success' => false, 'error' => $this->conn->error];
+    }
+    
+    public function updateLicensePeriod($license_id, $start_date, $duration_days) {
+        $expires_at = null;
+        if ($duration_days && $duration_days > 0) {
+            $start_timestamp = strtotime($start_date);
+            $expires_at = date('Y-m-d H:i:s', $start_timestamp + ($duration_days * 24 * 3600));
+        }
+        
+        $stmt = $this->conn->prepare("UPDATE licenses SET start_date = ?, duration_days = ?, expires_at = ? WHERE id = ?");
+        $stmt->bind_param("sisi", $start_date, $duration_days, $expires_at, $license_id);
+        return $stmt->execute();
+    }
+    
     public function deleteLicense($license_id) {
         $stmt = $this->conn->prepare("DELETE FROM licenses WHERE id = ?");
         $stmt->bind_param("i", $license_id);
@@ -183,7 +273,7 @@ class LicenseManager {
     
     public function getRecentLogs($limit = 50) {
         $sql = "
-            SELECT ll.*, l.client_name, l.license_key 
+            SELECT ll.*, l.client_name, l.client_phone, l.license_key 
             FROM license_logs ll
             LEFT JOIN licenses l ON ll.license_id = l.id
             ORDER BY ll.created_at DESC
@@ -192,6 +282,22 @@ class LicenseManager {
         
         $stmt = $this->conn->prepare($sql);
         $stmt->bind_param("i", $limit);
+        $stmt->execute();
+        return $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    }
+    
+    public function getExpiringLicenses($days = 30) {
+        $sql = "
+            SELECT *, DATEDIFF(expires_at, NOW()) as days_remaining
+            FROM licenses 
+            WHERE expires_at IS NOT NULL 
+            AND expires_at BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL ? DAY)
+            AND status = 'active'
+            ORDER BY expires_at ASC
+        ";
+        
+        $stmt = $this->conn->prepare($sql);
+        $stmt->bind_param("i", $days);
         $stmt->execute();
         return $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     }
@@ -242,7 +348,7 @@ if (!$licenseManager->isLoggedIn()) {
             <div class="text-center mb-4">
                 <i class="fas fa-key fa-3x text-primary mb-3"></i>
                 <h2>Servidor de Licencias</h2>
-                <p class="text-muted">Acceso al Panel de Administración</p>
+                <p class="text-muted">Acceso al Panel de Administración v1.1</p>
             </div>
             
             <?php if (isset($login_error)): ?>
@@ -286,8 +392,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $result = $licenseManager->createLicense($_POST);
         if ($result['success']) {
             $success_message = "Licencia creada exitosamente. Clave: " . $result['license_key'];
+            if ($result['expires_at']) {
+                $success_message .= "<br>Válida desde: " . date('d/m/Y', strtotime($result['start_date']));
+                $success_message .= "<br>Expira: " . date('d/m/Y', strtotime($result['expires_at']));
+            }
         } else {
             $error_message = "Error al crear licencia: " . $result['error'];
+        }
+    }
+    
+    if (isset($_POST['update_license'])) {
+        $license_id = (int)$_POST['edit_license_id'];
+        $result = $licenseManager->updateLicense($license_id, $_POST);
+        if ($result['success']) {
+            $success_message = "Licencia actualizada exitosamente";
+            if ($result['expires_at']) {
+                $success_message .= "<br>Nueva fecha de expiración: " . date('d/m/Y H:i', strtotime($result['expires_at']));
+            }
+        } else {
+            $error_message = "Error al actualizar licencia: " . $result['error'];
         }
     }
     
@@ -298,6 +421,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $success_message = "Estado de licencia actualizado";
         } else {
             $error_message = "Error al actualizar estado";
+        }
+    }
+    
+    if (isset($_POST['update_period'])) {
+        $license_id = (int)$_POST['license_id'];
+        $start_date = $_POST['start_date'];
+        $duration_days = (int)$_POST['duration_days'];
+        if ($licenseManager->updateLicensePeriod($license_id, $start_date, $duration_days)) {
+            $success_message = "Período de licencia actualizado";
+        } else {
+            $error_message = "Error al actualizar período";
         }
     }
     
@@ -316,6 +450,7 @@ $stats = $licenseManager->getLicenseStats();
 $recent_licenses = $licenseManager->getLicenses(10);
 $recent_logs = $licenseManager->getRecentLogs(20);
 $recent_activations = $licenseManager->getActivations();
+$expiring_licenses = $licenseManager->getExpiringLicenses(30);
 
 $current_tab = $_GET['tab'] ?? 'dashboard';
 ?>
@@ -325,7 +460,7 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Servidor de Licencias - Panel de Administración</title>
+    <title>Servidor de Licencias - Panel de Administración v1.1</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -334,6 +469,9 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
         .nav-link:hover, .nav-link.active { color: white !important; background: rgba(255,255,255,0.1); }
         .stat-card { border-left: 4px solid #667eea; }
         .table-actions { white-space: nowrap; }
+        .license-status-active { background-color: #d4edda; }
+        .license-status-expired { background-color: #f8d7da; }
+        .license-status-expiring { background-color: #fff3cd; }
     </style>
 </head>
 <body>
@@ -345,7 +483,7 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                     <div class="text-center mb-4">
                         <i class="fas fa-key fa-2x text-white mb-2"></i>
                         <h5 class="text-white">Servidor de Licencias</h5>
-                        <small class="text-light">v1.0</small>
+                        <small class="text-light">v1.1</small>
                     </div>
                     
                     <ul class="nav nav-pills flex-column">
@@ -357,6 +495,11 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                         <li class="nav-item">
                             <a class="nav-link <?= $current_tab === 'licenses' ? 'active' : '' ?>" href="?tab=licenses">
                                 <i class="fas fa-certificate me-2"></i>Licencias
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link <?= $current_tab === 'expiring' ? 'active' : '' ?>" href="?tab=expiring">
+                                <i class="fas fa-exclamation-triangle me-2"></i>Por Expirar
                             </a>
                         </li>
                         <li class="nav-item">
@@ -391,7 +534,7 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                     <?php if (isset($success_message)): ?>
                         <div class="alert alert-success alert-dismissible fade show">
                             <i class="fas fa-check-circle me-2"></i>
-                            <?= htmlspecialchars($success_message) ?>
+                            <?= $success_message ?>
                             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                         </div>
                     <?php endif; ?>
@@ -449,11 +592,11 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                                     <div class="card-body">
                                         <div class="d-flex justify-content-between">
                                             <div>
-                                                <p class="card-title text-muted mb-1">Activaciones</p>
-                                                <h3 class="mb-0"><?= $stats['total_activations'] ?? 0 ?></h3>
+                                                <p class="card-title text-muted mb-1">Por Expirar (30d)</p>
+                                                <h3 class="mb-0 text-warning"><?= $stats['expiring_soon'] ?? 0 ?></h3>
                                             </div>
-                                            <div class="text-info">
-                                                <i class="fas fa-plug fa-2x"></i>
+                                            <div class="text-warning">
+                                                <i class="fas fa-exclamation-triangle fa-2x"></i>
                                             </div>
                                         </div>
                                     </div>
@@ -465,11 +608,11 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                                     <div class="card-body">
                                         <div class="d-flex justify-content-between">
                                             <div>
-                                                <p class="card-title text-muted mb-1">Dominios Únicos</p>
-                                                <h3 class="mb-0"><?= $stats['unique_domains'] ?? 0 ?></h3>
+                                                <p class="card-title text-muted mb-1">Activaciones</p>
+                                                <h3 class="mb-0"><?= $stats['total_activations'] ?? 0 ?></h3>
                                             </div>
-                                            <div class="text-warning">
-                                                <i class="fas fa-globe fa-2x"></i>
+                                            <div class="text-info">
+                                                <i class="fas fa-plug fa-2x"></i>
                                             </div>
                                         </div>
                                     </div>
@@ -490,15 +633,27 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                                                 <thead>
                                                     <tr>
                                                         <th>Cliente</th>
+                                                        <th>Teléfono</th>
                                                         <th>Clave</th>
                                                         <th>Estado</th>
-                                                        <th>Fecha</th>
+                                                        <th>Expira</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
                                                     <?php foreach ($recent_licenses as $license): ?>
-                                                        <tr>
-                                                            <td><?= htmlspecialchars($license['client_name']) ?></td>
+                                                        <tr class="<?= $license['calculated_status'] === 'expired' ? 'license-status-expired' : ($license['days_remaining'] <= 7 && $license['days_remaining'] > 0 ? 'license-status-expiring' : '') ?>">
+                                                            <td>
+                                                                <strong><?= htmlspecialchars($license['client_name']) ?></strong><br>
+                                                                <small class="text-muted"><?= htmlspecialchars($license['client_email']) ?></small>
+                                                            </td>
+                                                            <td>
+                                                                <?php if ($license['client_phone']): ?>
+                                                                    <i class="fas fa-phone me-1"></i>
+                                                                    <?= htmlspecialchars($license['client_phone']) ?>
+                                                                <?php else: ?>
+                                                                    <small class="text-muted">N/A</small>
+                                                                <?php endif; ?>
+                                                            </td>
                                                             <td><code><?= htmlspecialchars(substr($license['license_key'], 0, 20)) ?>...</code></td>
                                                             <td>
                                                                 <?php
@@ -512,7 +667,16 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                                                                 ?>
                                                                 <span class="badge bg-<?= $color ?>"><?= ucfirst($license['status']) ?></span>
                                                             </td>
-                                                            <td><?= date('d/m/Y', strtotime($license['created_at'])) ?></td>
+                                                            <td>
+                                                                <?php if ($license['expires_at']): ?>
+                                                                    <?= date('d/m/Y', strtotime($license['expires_at'])) ?>
+                                                                    <?php if ($license['days_remaining'] > 0): ?>
+                                                                        <br><small class="text-muted">(<?= $license['days_remaining'] ?> días)</small>
+                                                                    <?php endif; ?>
+                                                                <?php else: ?>
+                                                                    <span class="badge bg-info">Permanente</span>
+                                                                <?php endif; ?>
+                                                            </td>
                                                         </tr>
                                                     <?php endforeach; ?>
                                                 </tbody>
@@ -536,7 +700,11 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                                                         <small class="text-muted"><?= date('H:i', strtotime($log['created_at'])) ?></small>
                                                         <p class="mb-1 small">
                                                             <?php if ($log['client_name']): ?>
-                                                                <strong><?= htmlspecialchars($log['client_name']) ?></strong><br>
+                                                                <strong><?= htmlspecialchars($log['client_name']) ?></strong>
+                                                                <?php if ($log['client_phone']): ?>
+                                                                    <br><small class="text-muted"><?= htmlspecialchars($log['client_phone']) ?></small>
+                                                                <?php endif; ?>
+                                                                <br>
                                                             <?php endif; ?>
                                                             <?= htmlspecialchars($log['action']) ?>: <?= htmlspecialchars($log['message']) ?>
                                                         </p>
@@ -569,11 +737,11 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                                         <thead>
                                             <tr>
                                                 <th>Cliente</th>
-                                                <th>Email</th>
+                                                <th>Contacto</th>
                                                 <th>Clave de Licencia</th>
                                                 <th>Tipo</th>
+                                                <th>Período</th>
                                                 <th>Estado</th>
-                                                <th>Expira</th>
                                                 <th>Activaciones</th>
                                                 <th>Acciones</th>
                                             </tr>
@@ -583,11 +751,39 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                                             $all_licenses = $licenseManager->getLicenses(100);
                                             foreach ($all_licenses as $license): 
                                             ?>
-                                                <tr>
-                                                    <td><?= htmlspecialchars($license['client_name']) ?></td>
-                                                    <td><?= htmlspecialchars($license['client_email']) ?></td>
+                                                <tr class="<?= $license['calculated_status'] === 'expired' ? 'license-status-expired' : ($license['days_remaining'] <= 7 && $license['days_remaining'] > 0 ? 'license-status-expiring' : '') ?>">
+                                                    <td>
+                                                        <strong><?= htmlspecialchars($license['client_name']) ?></strong><br>
+                                                        <small class="text-muted"><?= htmlspecialchars($license['client_email']) ?></small>
+                                                    </td>
+                                                    <td>
+                                                        <?php if ($license['client_phone']): ?>
+                                                            <i class="fas fa-phone me-1"></i>
+                                                            <?= htmlspecialchars($license['client_phone']) ?>
+                                                        <?php else: ?>
+                                                            <small class="text-muted">N/A</small>
+                                                        <?php endif; ?>
+                                                    </td>
                                                     <td><code><?= htmlspecialchars($license['license_key']) ?></code></td>
                                                     <td><?= ucfirst($license['license_type']) ?></td>
+                                                    <td>
+                                                        <?php if ($license['start_date']): ?>
+                                                            <small>
+                                                                <strong>Inicio:</strong> <?= date('d/m/Y', strtotime($license['start_date'])) ?><br>
+                                                                <?php if ($license['duration_days']): ?>
+                                                                    <strong>Duración:</strong> <?= $license['duration_days'] ?> días<br>
+                                                                    <strong>Expira:</strong> <?= date('d/m/Y', strtotime($license['expires_at'])) ?>
+                                                                    <?php if ($license['days_remaining'] > 0): ?>
+                                                                        <br><span class="text-warning">(<?= $license['days_remaining'] ?> días restantes)</span>
+                                                                    <?php endif; ?>
+                                                                <?php else: ?>
+                                                                    <span class="badge bg-info">Permanente</span>
+                                                                <?php endif; ?>
+                                                            </small>
+                                                        <?php else: ?>
+                                                            <span class="badge bg-info">Permanente</span>
+                                                        <?php endif; ?>
+                                                    </td>
                                                     <td>
                                                         <?php
                                                         $status_colors = [
@@ -599,9 +795,9 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                                                         $color = $status_colors[$license['status']] ?? 'secondary';
                                                         ?>
                                                         <span class="badge bg-<?= $color ?>"><?= ucfirst($license['status']) ?></span>
-                                                    </td>
-                                                    <td>
-                                                        <?= $license['expires_at'] ? date('d/m/Y', strtotime($license['expires_at'])) : 'Permanente' ?>
+                                                        <?php if ($license['calculated_status'] === 'expired'): ?>
+                                                            <br><small class="text-danger">Expirada</small>
+                                                        <?php endif; ?>
                                                     </td>
                                                     <td>
                                                         <span class="badge bg-info"><?= $license['active_activations'] ?></span>
@@ -612,6 +808,9 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                                                         <div class="btn-group" role="group">
                                                             <button class="btn btn-sm btn-outline-primary" onclick="editLicense(<?= $license['id'] ?>)">
                                                                 <i class="fas fa-edit"></i>
+                                                            </button>
+                                                            <button class="btn btn-sm btn-outline-warning" onclick="editPeriod(<?= $license['id'] ?>, '<?= $license['start_date'] ?>', <?= $license['duration_days'] ?: 0 ?>)">
+                                                                <i class="fas fa-calendar-alt"></i>
                                                             </button>
                                                             <button class="btn btn-sm btn-outline-info" onclick="viewActivations(<?= $license['id'] ?>)">
                                                                 <i class="fas fa-eye"></i>
@@ -626,6 +825,77 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                                         </tbody>
                                     </table>
                                 </div>
+                            </div>
+                        </div>
+                    <?php endif; ?>
+                    
+                    <?php if ($current_tab === 'expiring'): ?>
+                        <!-- Licencias por expirar -->
+                        <div class="d-flex justify-content-between align-items-center mb-4">
+                            <h2><i class="fas fa-exclamation-triangle me-2"></i>Licencias por Expirar</h2>
+                        </div>
+                        
+                        <div class="card">
+                            <div class="card-body">
+                                <?php if (!empty($expiring_licenses)): ?>
+                                    <div class="table-responsive">
+                                        <table class="table table-hover">
+                                            <thead>
+                                                <tr>
+                                                    <th>Cliente</th>
+                                                    <th>Contacto</th>
+                                                    <th>Clave de Licencia</th>
+                                                    <th>Expira</th>
+                                                    <th>Días Restantes</th>
+                                                    <th>Acciones</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <?php foreach ($expiring_licenses as $license): ?>
+                                                    <tr class="<?= $license['days_remaining'] <= 7 ? 'license-status-expiring' : '' ?>">
+                                                        <td>
+                                                            <strong><?= htmlspecialchars($license['client_name']) ?></strong><br>
+                                                            <small class="text-muted"><?= htmlspecialchars($license['client_email']) ?></small>
+                                                        </td>
+                                                        <td>
+                                                            <?php if ($license['client_phone']): ?>
+                                                                <i class="fas fa-phone me-1"></i>
+                                                                <a href="tel:<?= htmlspecialchars($license['client_phone']) ?>"><?= htmlspecialchars($license['client_phone']) ?></a>
+                                                            <?php else: ?>
+                                                                <small class="text-muted">N/A</small>
+                                                            <?php endif; ?>
+                                                        </td>
+                                                        <td><code><?= htmlspecialchars($license['license_key']) ?></code></td>
+                                                        <td><?= date('d/m/Y H:i', strtotime($license['expires_at'])) ?></td>
+                                                        <td>
+                                                            <?php
+                                                            $days = $license['days_remaining'];
+                                                            $class = $days <= 3 ? 'danger' : ($days <= 7 ? 'warning' : 'info');
+                                                            ?>
+                                                            <span class="badge bg-<?= $class ?>"><?= $days ?> días</span>
+                                                        </td>
+                                                        <td>
+                                                            <div class="btn-group" role="group">
+                                                                <button class="btn btn-sm btn-outline-success" onclick="extendLicense(<?= $license['id'] ?>)">
+                                                                    <i class="fas fa-calendar-plus"></i> Extender
+                                                                </button>
+                                                                <button class="btn btn-sm btn-outline-primary" onclick="contactClient('<?= htmlspecialchars($license['client_phone']) ?>', '<?= htmlspecialchars($license['client_name']) ?>')">
+                                                                    <i class="fas fa-phone"></i> Contactar
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                <?php endforeach; ?>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                <?php else: ?>
+                                    <div class="text-center py-4">
+                                        <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
+                                        <h5>¡Excelente!</h5>
+                                        <p class="text-muted">No hay licencias próximas a expirar en los próximos 30 días.</p>
+                                    </div>
+                                <?php endif; ?>
                             </div>
                         </div>
                     <?php endif; ?>
@@ -653,6 +923,7 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                                         <thead>
                                             <tr>
                                                 <th>Cliente</th>
+                                                <th>Contacto</th>
                                                 <th>Clave de Licencia</th>
                                                 <th>Dominio</th>
                                                 <th>IP</th>
@@ -669,6 +940,14 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                                                     <tr>
                                                         <td>
                                                             <strong><?= htmlspecialchars($activation['client_name']) ?></strong>
+                                                        </td>
+                                                        <td>
+                                                            <?php if ($activation['client_phone']): ?>
+                                                                <i class="fas fa-phone me-1"></i>
+                                                                <?= htmlspecialchars($activation['client_phone']) ?>
+                                                            <?php else: ?>
+                                                                <small class="text-muted">N/A</small>
+                                                            <?php endif; ?>
                                                         </td>
                                                         <td>
                                                             <code><?= htmlspecialchars(substr($activation['license_key'], 0, 20)) ?>...</code>
@@ -716,7 +995,7 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                                                 <?php endforeach; ?>
                                             <?php else: ?>
                                                 <tr>
-                                                    <td colspan="9" class="text-center py-4">
+                                                    <td colspan="10" class="text-center py-4">
                                                         <i class="fas fa-plug fa-2x text-muted mb-2"></i>
                                                         <p class="text-muted mb-0">No hay activaciones registradas</p>
                                                     </td>
@@ -785,6 +1064,7 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                                             <tr>
                                                 <th>Fecha/Hora</th>
                                                 <th>Cliente</th>
+                                                <th>Contacto</th>
                                                 <th>Acción</th>
                                                 <th>Estado</th>
                                                 <th>Mensaje</th>
@@ -800,6 +1080,13 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                                                     <td>
                                                         <?php if ($log['client_name']): ?>
                                                             <small><?= htmlspecialchars($log['client_name']) ?></small>
+                                                        <?php else: ?>
+                                                            <small class="text-muted">-</small>
+                                                        <?php endif; ?>
+                                                    </td>
+                                                    <td>
+                                                        <?php if ($log['client_phone']): ?>
+                                                            <small><?= htmlspecialchars($log['client_phone']) ?></small>
                                                         <?php else: ?>
                                                             <small class="text-muted">-</small>
                                                         <?php endif; ?>
@@ -843,7 +1130,7 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
     
     <!-- Modal para crear licencia -->
     <div class="modal fade" id="createLicenseModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-xl">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">
@@ -854,63 +1141,119 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                 <form method="POST">
                     <div class="modal-body">
                         <div class="row">
+                            <!-- Información del Cliente -->
                             <div class="col-md-6">
+                                <h6 class="mb-3 text-primary">
+                                    <i class="fas fa-user me-2"></i>Información del Cliente
+                                </h6>
+                                
                                 <div class="mb-3">
                                     <label for="client_name" class="form-label">Nombre del Cliente</label>
                                     <input type="text" class="form-control" name="client_name" required>
                                 </div>
-                            </div>
-                            <div class="col-md-6">
+                                
                                 <div class="mb-3">
                                     <label for="client_email" class="form-label">Email del Cliente</label>
                                     <input type="email" class="form-control" name="client_email" required>
                                 </div>
+                                
+                                <div class="mb-3">
+                                    <label for="client_phone" class="form-label">Teléfono del Cliente</label>
+                                    <input type="tel" class="form-control" name="client_phone" placeholder="+57 300 123 4567">
+                                    <div class="form-text">Incluye código de país para mejor contacto</div>
+                                </div>
+                            </div>
+                            
+                            <!-- Configuración de Licencia -->
+                            <div class="col-md-6">
+                                <h6 class="mb-3 text-info">
+                                    <i class="fas fa-cog me-2"></i>Configuración de Licencia
+                                </h6>
+                                
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="product_name" class="form-label">Producto</label>
+                                            <input type="text" class="form-control" name="product_name" value="Sistema de Códigos">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="version" class="form-label">Versión</label>
+                                            <input type="text" class="form-control" name="version" value="1.0">
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="license_type" class="form-label">Tipo de Licencia</label>
+                                            <select class="form-select" name="license_type">
+                                                <option value="single">Single Domain</option>
+                                                <option value="multiple">Multiple Domains</option>
+                                                <option value="unlimited">Unlimited Domains</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="max_domains" class="form-label">Máximo Dominios</label>
+                                            <input type="number" class="form-control" name="max_domains" value="1" min="1">
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         
+                        <!-- Configuración de Período -->
                         <div class="row">
-                            <div class="col-md-6">
+                            <div class="col-12">
+                                <h6 class="mb-3 text-warning">
+                                    <i class="fas fa-calendar-alt me-2"></i>Configuración de Período
+                                </h6>
+                            </div>
+                            
+                            <div class="col-md-4">
                                 <div class="mb-3">
-                                    <label for="product_name" class="form-label">Producto</label>
-                                    <input type="text" class="form-control" name="product_name" value="Sistema de Códigos">
+                                    <label for="start_date" class="form-label">Fecha de Inicio</label>
+                                    <input type="datetime-local" class="form-control" name="start_date" 
+                                           value="<?= date('Y-m-d\TH:i') ?>">
+                                    <div class="form-text">Cuándo comienza la validez de la licencia</div>
                                 </div>
                             </div>
-                            <div class="col-md-6">
+                            
+                            <div class="col-md-4">
                                 <div class="mb-3">
-                                    <label for="version" class="form-label">Versión</label>
-                                    <input type="text" class="form-control" name="version" value="1.0">
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label for="license_type" class="form-label">Tipo de Licencia</label>
-                                    <select class="form-select" name="license_type">
-                                        <option value="single">Single Domain</option>
-                                        <option value="multiple">Multiple Domains</option>
-                                        <option value="unlimited">Unlimited Domains</option>
+                                    <label for="duration_days" class="form-label">Duración (días)</label>
+                                    <select class="form-select" name="duration_days" id="duration_days">
+                                        <option value="">Permanente</option>
+                                        <option value="7">7 días (Prueba)</option>
+                                        <option value="30">30 días (1 mes)</option>
+                                        <option value="90">90 días (3 meses)</option>
+                                        <option value="180">180 días (6 meses)</option>
+                                        <option value="365">365 días (1 año)</option>
+                                        <option value="730">730 días (2 años)</option>
+                                        <option value="custom">Personalizado...</option>
                                     </select>
+                                    <div class="form-text">Vacío = licencia permanente</div>
                                 </div>
                             </div>
-                            <div class="col-md-6">
+                            
+                            <div class="col-md-4">
                                 <div class="mb-3">
-                                    <label for="max_domains" class="form-label">Máximo Dominios</label>
-                                    <input type="number" class="form-control" name="max_domains" value="1" min="1">
+                                    <label for="custom_duration" class="form-label">Días personalizados</label>
+                                    <input type="number" class="form-control" name="custom_duration" 
+                                           id="custom_duration" min="1" max="3650" style="display: none;">
+                                    <div class="form-text" id="expiry_preview"></div>
                                 </div>
                             </div>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="expires_at" class="form-label">Fecha de Expiración (opcional)</label>
-                            <input type="datetime-local" class="form-control" name="expires_at">
-                            <div class="form-text">Dejar vacío para licencia permanente</div>
                         </div>
                         
                         <div class="mb-3">
                             <label for="notes" class="form-label">Notas</label>
-                            <textarea class="form-control" name="notes" rows="3"></textarea>
+                            <textarea class="form-control" name="notes" rows="3" 
+                                      placeholder="Notas adicionales sobre esta licencia..."></textarea>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -924,94 +1267,455 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
         </div>
     </div>
     
+    <!-- Modal para editar licencia completa -->
+    <div class="modal fade" id="editLicenseModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-edit me-2"></i>Editar Licencia
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <form method="POST" id="editLicenseForm">
+                    <input type="hidden" name="edit_license_id" id="edit_license_id">
+                    <div class="modal-body">
+                        <div class="row">
+                            <!-- Información del Cliente -->
+                            <div class="col-md-6">
+                                <h6 class="mb-3 text-primary">
+                                    <i class="fas fa-user me-2"></i>Información del Cliente
+                                </h6>
+                                
+                                <div class="mb-3">
+                                    <label for="edit_client_name" class="form-label">Nombre del Cliente</label>
+                                    <input type="text" class="form-control" name="client_name" id="edit_client_name" required>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="edit_client_email" class="form-label">Email del Cliente</label>
+                                    <input type="email" class="form-control" name="client_email" id="edit_client_email" required>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="edit_client_phone" class="form-label">Teléfono del Cliente</label>
+                                    <input type="tel" class="form-control" name="client_phone" id="edit_client_phone">
+                                </div>
+                            </div>
+                            
+                            <!-- Configuración de Licencia -->
+                            <div class="col-md-6">
+                                <h6 class="mb-3 text-info">
+                                    <i class="fas fa-cog me-2"></i>Configuración de Licencia
+                                </h6>
+                                
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="edit_product_name" class="form-label">Producto</label>
+                                            <input type="text" class="form-control" name="product_name" id="edit_product_name">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="edit_version" class="form-label">Versión</label>
+                                            <input type="text" class="form-control" name="version" id="edit_version">
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="edit_license_type" class="form-label">Tipo de Licencia</label>
+                                            <select class="form-select" name="license_type" id="edit_license_type">
+                                                <option value="single">Single Domain</option>
+                                                <option value="multiple">Multiple Domains</option>
+                                                <option value="unlimited">Unlimited Domains</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="edit_max_domains" class="form-label">Máximo Dominios</label>
+                                            <input type="number" class="form-control" name="max_domains" id="edit_max_domains" min="1">
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="edit_status" class="form-label">Estado</label>
+                                    <select class="form-select" name="status" id="edit_status">
+                                        <option value="active">Activa</option>
+                                        <option value="suspended">Suspendida</option>
+                                        <option value="expired">Expirada</option>
+                                        <option value="revoked">Revocada</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Configuración de Período -->
+                        <div class="row">
+                            <div class="col-12">
+                                <h6 class="mb-3 text-warning">
+                                    <i class="fas fa-calendar-alt me-2"></i>Configuración de Período
+                                </h6>
+                            </div>
+                            
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="edit_start_date" class="form-label">Fecha de Inicio</label>
+                                    <input type="datetime-local" class="form-control" name="start_date" id="edit_start_date">
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="edit_duration_days" class="form-label">Duración (días)</label>
+                                    <select class="form-select" name="duration_days" id="edit_duration_days">
+                                        <option value="">Permanente</option>
+                                        <option value="7">7 días (Prueba)</option>
+                                        <option value="30">30 días (1 mes)</option>
+                                        <option value="90">90 días (3 meses)</option>
+                                        <option value="180">180 días (6 meses)</option>
+                                        <option value="365">365 días (1 año)</option>
+                                        <option value="730">730 días (2 años)</option>
+                                        <option value="custom">Personalizado...</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="edit_custom_duration" class="form-label">Días personalizados</label>
+                                    <input type="number" class="form-control" name="custom_duration" 
+                                           id="edit_custom_duration" min="1" max="3650" style="display: none;">
+                                    <div class="form-text" id="edit_expiry_preview"></div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="edit_notes" class="form-label">Notas</label>
+                            <textarea class="form-control" name="notes" id="edit_notes" rows="3"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" name="update_license" class="btn btn-primary">
+                            <i class="fas fa-save me-2"></i>Actualizar Licencia
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para editar período -->
+    <div class="modal fade" id="editPeriodModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-calendar-alt me-2"></i>Editar Período de Licencia
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <form method="POST" id="editPeriodForm">
+                    <input type="hidden" name="license_id" id="period_license_id">
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label for="period_start_date" class="form-label">Fecha de Inicio</label>
+                            <input type="datetime-local" class="form-control" name="start_date" id="period_start_date" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="period_duration_days" class="form-label">Duración (días)</label>
+                            <select class="form-select" name="duration_days" id="period_duration_days">
+                                <option value="">Permanente</option>
+                                <option value="7">7 días (Prueba)</option>
+                                <option value="30">30 días (1 mes)</option>
+                                <option value="90">90 días (3 meses)</option>
+                                <option value="180">180 días (6 meses)</option>
+                                <option value="365">365 días (1 año)</option>
+                                <option value="730">730 días (2 años)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="alert alert-info">
+                            <small>
+                                <i class="fas fa-info-circle me-2"></i>
+                                La fecha de expiración se calculará automáticamente basada en la fecha de inicio y la duración.
+                            </small>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" name="update_period" class="btn btn-primary">
+                            <i class="fas fa-save me-2"></i>Actualizar Período
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        // Manejar duración personalizada
+        document.getElementById('duration_days').addEventListener('change', function() {
+            const customField = document.getElementById('custom_duration');
+            if (this.value === 'custom') {
+                customField.style.display = 'block';
+                customField.required = true;
+            } else {
+                customField.style.display = 'none';
+                customField.required = false;
+                updateExpiryPreview();
+            }
+        });
+        
+        function updateExpiryPreview() {
+            const startDate = document.querySelector('[name="start_date"]').value;
+            const durationSelect = document.getElementById('duration_days');
+            const customDuration = document.getElementById('custom_duration');
+            const preview = document.getElementById('expiry_preview');
+            
+            if (!startDate) {
+                preview.innerHTML = '';
+                return;
+            }
+            
+            let duration = durationSelect.value === 'custom' ? customDuration.value : durationSelect.value;
+            
+            if (duration && duration > 0) {
+                const start = new Date(startDate);
+                const expiry = new Date(start.getTime() + (duration * 24 * 60 * 60 * 1000));
+                preview.innerHTML = `<i class="fas fa-clock me-1"></i>Expira: ${expiry.toLocaleDateString('es-ES')}`;
+                preview.className = 'form-text text-info';
+            } else {
+                preview.innerHTML = '<i class="fas fa-infinity me-1"></i>Licencia permanente';
+                preview.className = 'form-text text-success';
+            }
+        }
+        
+        // Event listeners para actualizar preview
+        document.addEventListener('DOMContentLoaded', function() {
+            const startDateField = document.querySelector('[name="start_date"]');
+            const durationField = document.getElementById('duration_days');
+            const customField = document.getElementById('custom_duration');
+            
+            if (startDateField) startDateField.addEventListener('change', updateExpiryPreview);
+            if (durationField) durationField.addEventListener('change', updateExpiryPreview);
+            if (customField) customField.addEventListener('input', updateExpiryPreview);
+            
+            updateExpiryPreview();
+        });
+        
+        // Manejar duración personalizada en el modal de edición
+        document.getElementById('edit_duration_days').addEventListener('change', function() {
+            const customField = document.getElementById('edit_custom_duration');
+            if (this.value === 'custom') {
+                customField.style.display = 'block';
+                customField.required = true;
+            } else {
+                customField.style.display = 'none';
+                customField.required = false;
+                updateEditExpiryPreview();
+            }
+        });
+        
+        function updateEditExpiryPreview() {
+            const startDate = document.getElementById('edit_start_date').value;
+            const durationSelect = document.getElementById('edit_duration_days');
+            const customDuration = document.getElementById('edit_custom_duration');
+            const preview = document.getElementById('edit_expiry_preview');
+            
+            if (!startDate) {
+                preview.innerHTML = '';
+                return;
+            }
+            
+            let duration = durationSelect.value === 'custom' ? customDuration.value : durationSelect.value;
+            
+            if (duration && duration > 0) {
+                const start = new Date(startDate);
+                const expiry = new Date(start.getTime() + (duration * 24 * 60 * 60 * 1000));
+                preview.innerHTML = `<i class="fas fa-clock me-1"></i>Expira: ${expiry.toLocaleDateString('es-ES')}`;
+                preview.className = 'form-text text-info';
+            } else {
+                preview.innerHTML = '<i class="fas fa-infinity me-1"></i>Licencia permanente';
+                preview.className = 'form-text text-success';
+            }
+        }
+        
+        // Event listeners para actualizar preview en edición
+        const editStartDateField = document.getElementById('edit_start_date');
+        const editDurationField = document.getElementById('edit_duration_days');
+        const editCustomField = document.getElementById('edit_custom_duration');
+        
+        if (editStartDateField) editStartDateField.addEventListener('change', updateEditExpiryPreview);
+        if (editDurationField) editDurationField.addEventListener('change', updateEditExpiryPreview);
+        if (editCustomField) editCustomField.addEventListener('input', updateEditExpiryPreview);
+        
         function editLicense(id) {
-            // Implementar edición de licencia
-            alert('Función de edición - ID: ' + id);
+            // Obtener datos de la licencia
+            fetch('license_ajax.php?action=get_license&id=' + id)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const license = data.license;
+                        
+                        // Llenar el formulario
+                        document.getElementById('edit_license_id').value = license.id;
+                        document.getElementById('edit_client_name').value = license.client_name || '';
+                        document.getElementById('edit_client_email').value = license.client_email || '';
+                        document.getElementById('edit_client_phone').value = license.client_phone || '';
+                        document.getElementById('edit_product_name').value = license.product_name || '';
+                        document.getElementById('edit_version').value = license.version || '';
+                        document.getElementById('edit_license_type').value = license.license_type || '';
+                        document.getElementById('edit_max_domains').value = license.max_domains || '';
+                        document.getElementById('edit_status').value = license.status || '';
+                        document.getElementById('edit_notes').value = license.notes || '';
+                        
+                        // Configurar fecha de inicio
+                        if (license.start_date && license.start_date !== '0000-00-00 00:00:00') {
+                            const startDate = new Date(license.start_date);
+                            const isoString = startDate.toISOString().slice(0, 16);
+                            document.getElementById('edit_start_date').value = isoString;
+                        }
+                        
+                        // Configurar duración
+                        if (license.duration_days) {
+                            const durationSelect = document.getElementById('edit_duration_days');
+                            const standardValues = ['7', '30', '90', '180', '365', '730'];
+                            
+                            if (standardValues.includes(license.duration_days.toString())) {
+                                durationSelect.value = license.duration_days;
+                            } else {
+                                durationSelect.value = 'custom';
+                                document.getElementById('edit_custom_duration').style.display = 'block';
+                                document.getElementById('edit_custom_duration').value = license.duration_days;
+                            }
+                        } else {
+                            document.getElementById('edit_duration_days').value = '';
+                        }
+                        
+                        updateEditExpiryPreview();
+                        
+                        // Mostrar modal
+                        const modal = new bootstrap.Modal(document.getElementById('editLicenseModal'));
+                        modal.show();
+                    } else {
+                        alert('Error al cargar datos de la licencia: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    alert('Error de conexión: ' + error.message);
+                });
+        }
+        
+        // Manejar envío del formulario de edición con AJAX
+        document.getElementById('editLicenseForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            formData.append('action', 'update_license');
+            formData.append('license_id', document.getElementById('edit_license_id').value);
+            
+            // Mostrar loading
+            const submitBtn = this.querySelector('button[type="submit"]');
+            const originalText = submitBtn.innerHTML;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Actualizando...';
+            submitBtn.disabled = true;
+            
+            fetch('license_ajax.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Cerrar modal
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('editLicenseModal'));
+                    modal.hide();
+                    
+                    // Mostrar mensaje de éxito y recargar página
+                    alert('Licencia actualizada exitosamente');
+                    window.location.reload();
+                } else {
+                    alert('Error al actualizar licencia: ' + data.error);
+                }
+            })
+            .catch(error => {
+                alert('Error de conexión: ' + error.message);
+            })
+            .finally(() => {
+                // Restaurar botón
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+            });
+        });
+        
+        // Función mejorada para eliminar licencia
+        function deleteLicense(id, clientName) {
+            if (confirm('¿Estás seguro de eliminar la licencia de "' + clientName + '"?\n\nEsta acción no se puede deshacer.')) {
+                const formData = new FormData();
+                formData.append('action', 'delete_license');
+                formData.append('license_id', id);
+                
+                fetch('license_ajax.php', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('Licencia eliminada exitosamente');
+                        window.location.reload();
+                    } else {
+                        alert('Error al eliminar licencia: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    alert('Error de conexión: ' + error.message);
+                });
+            }
+        }
+        
+        function editPeriod(id, startDate, durationDays) {
+            document.getElementById('period_license_id').value = id;
+            document.getElementById('period_start_date').value = startDate ? startDate.replace(' ', 'T').substring(0, 16) : '';
+            document.getElementById('period_duration_days').value = durationDays || '';
+            
+            const modal = new bootstrap.Modal(document.getElementById('editPeriodModal'));
+            modal.show();
         }
         
         function viewActivations(id) {
-            // Ver activaciones de una licencia
             window.location.href = '?tab=activations&license=' + id;
         }
         
-        function deleteLicense(id, clientName) {
-            if (confirm('¿Estás seguro de eliminar la licencia de "' + clientName + '"?\n\nEsta acción no se puede deshacer.')) {
-                // Crear formulario para eliminar
-                const form = document.createElement('form');
-                form.method = 'POST';
-                form.innerHTML = '<input type="hidden" name="delete_license" value="1"><input type="hidden" name="license_id" value="' + id + '">';
-                document.body.appendChild(form);
-                form.submit();
+        function extendLicense(id) {
+            const extension = prompt('¿Cuántos días adicionales desea agregar?', '30');
+            if (extension && parseInt(extension) > 0) {
+                // Implementar extensión de licencia
+                alert('Función de extensión - Agregar ' + extension + ' días a licencia ID: ' + id);
+            }
+        }
+        
+        function contactClient(phone, clientName) {
+            if (phone) {
+                window.open('tel:' + phone);
+            } else {
+                alert('No hay número de teléfono registrado para ' + clientName);
             }
         }
         
         function viewActivationDetails(activationId) {
             // Mostrar detalles de activación
-            fetch('api_admin.php?action=get_activation_details&id=' + activationId)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        showActivationModal(data.activation);
-                    } else {
-                        alert('Error al cargar detalles: ' + data.error);
-                    }
-                })
-                .catch(error => {
-                    alert('Error de conexión');
-                });
-        }
-        
-        function showActivationModal(activation) {
-            let modalHTML = `
-                <div class="modal fade" id="activationDetailsModal" tabindex="-1">
-                    <div class="modal-dialog modal-lg">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title">
-                                    <i class="fas fa-info-circle me-2"></i>Detalles de Activación
-                                </h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                            </div>
-                            <div class="modal-body">
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <strong>Dominio:</strong> ${activation.domain}<br>
-                                        <strong>IP:</strong> ${activation.ip_address}<br>
-                                        <strong>Estado:</strong> <span class="badge bg-success">${activation.status}</span><br>
-                                        <strong>Activada:</strong> ${activation.activated_at}
-                                    </div>
-                                    <div class="col-md-6">
-                                        <strong>Última verificación:</strong> ${activation.last_check}<br>
-                                        <strong>Total verificaciones:</strong> ${activation.check_count}<br>
-                                        <strong>User Agent:</strong><br>
-                                        <small class="text-muted">${activation.user_agent || 'No disponible'}</small>
-                                    </div>
-                                </div>
-                                ${activation.server_info ? `
-                                <hr>
-                                <h6>Información del Servidor</h6>
-                                <pre class="bg-light p-2 rounded">${JSON.stringify(JSON.parse(activation.server_info), null, 2)}</pre>
-                                ` : ''}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            // Eliminar modal anterior si existe
-            const existingModal = document.getElementById('activationDetailsModal');
-            if (existingModal) {
-                existingModal.remove();
-            }
-            
-            // Agregar nuevo modal
-            document.body.insertAdjacentHTML('beforeend', modalHTML);
-            
-            // Mostrar modal
-            const modal = new bootstrap.Modal(document.getElementById('activationDetailsModal'));
-            modal.show();
+            alert('Detalles de activación ID: ' + activationId);
         }
         
         function blockActivation(activationId) {
@@ -1036,50 +1740,6 @@ $current_tab = $_GET['tab'] ?? 'dashboard';
                 document.body.appendChild(form);
                 form.submit();
             }
-        }
-        
-        // Función para generar múltiples licencias
-        function generateBulkLicenses() {
-            const quantity = prompt('¿Cuántas licencias desea generar?', '5');
-            if (quantity && parseInt(quantity) > 0) {
-                if (confirm(`¿Generar ${quantity} licencias con configuración predeterminada?`)) {
-                    window.open('bulk_generator.php?quantity=' + quantity, '_blank');
-                }
-            }
-        }
-        
-        // Auto-refresh para estadísticas cada 30 segundos
-        if (window.location.search.includes('tab=dashboard') || !window.location.search.includes('tab=')) {
-            setInterval(function() {
-                // Solo actualizar si estamos en dashboard y no hay modales abiertos
-                if (document.querySelectorAll('.modal.show').length === 0) {
-                    fetch('api_admin.php?action=get_stats')
-                        .then(response => response.json())
-                        .then(data => {
-                            if (data.success) {
-                                updateDashboardStats(data.stats);
-                            }
-                        })
-                        .catch(error => console.log('Error actualizando stats'));
-                }
-            }, 30000);
-        }
-        
-        function updateDashboardStats(stats) {
-            // Actualizar estadísticas en tiempo real
-            const statElements = {
-                'total_licenses': stats.total_licenses,
-                'active_licenses': stats.active_licenses,
-                'total_activations': stats.total_activations,
-                'unique_domains': stats.unique_domains
-            };
-            
-            Object.keys(statElements).forEach(key => {
-                const element = document.querySelector(`[data-stat="${key}"]`);
-                if (element) {
-                    element.textContent = statElements[key];
-                }
-            });
         }
     </script>
 </body>

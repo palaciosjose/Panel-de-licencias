@@ -2,7 +2,7 @@
 /**
  * API del Servidor de Licencias
  * Maneja validación, activación y verificación de licencias
- * Version: 1.0
+ * Version: 1.1 - Con soporte para teléfono y períodos
  */
 
 header('Content-Type: application/json');
@@ -26,7 +26,7 @@ $license_db_config = [
 
 class LicenseAPI {
     private $conn;
-    private $api_version = '4.5';
+    private $api_version = '4.6';
     
     public function __construct($db_config) {
         $this->conn = new mysqli(
@@ -44,8 +44,6 @@ class LicenseAPI {
     }
     
     public function handleRequest() {
-    $method = $_SERVER['REQUEST_METHOD'];
-    $action = $_GET['action'] ?? $_POST['action'] ?? '';
         $method = $_SERVER['REQUEST_METHOD'];
         $action = $_GET['action'] ?? $_POST['action'] ?? '';
         
@@ -68,6 +66,9 @@ class LicenseAPI {
             case 'status':
                 $this->getStatus();
                 break;
+            case 'info':
+                $this->getLicenseInfo();
+                break;
             default:
                 $this->sendError('Invalid action', 400);
         }
@@ -84,14 +85,33 @@ class LicenseAPI {
         // Limpiar y validar el dominio
         $domain = $this->cleanDomain($domain);
         
-        // Buscar la licencia
-        $stmt = $this->conn->prepare("SELECT * FROM licenses WHERE license_key = ?");
+        // Buscar la licencia con información completa
+        $stmt = $this->conn->prepare("
+            SELECT *, 
+                   CASE 
+                       WHEN expires_at IS NULL THEN 'permanent'
+                       WHEN expires_at > NOW() THEN 'valid'
+                       ELSE 'expired'
+                   END as period_status,
+                   CASE 
+                       WHEN expires_at IS NOT NULL AND expires_at > NOW() 
+                       THEN DATEDIFF(expires_at, NOW()) 
+                       ELSE NULL 
+                   END as days_remaining,
+                   CASE 
+                       WHEN start_date > NOW() THEN 'pending'
+                       WHEN start_date <= NOW() AND (expires_at IS NULL OR expires_at > NOW()) THEN 'active_period'
+                       ELSE 'expired_period'
+                   END as current_period_status
+            FROM licenses 
+            WHERE license_key = ?
+        ");
         $stmt->bind_param("s", $license_key);
         $stmt->execute();
         $license = $stmt->get_result()->fetch_assoc();
         
         if (!$license) {
-            $this->logActivity($license['id'] ?? null, null, 'validation', 'failure', 'License key not found');
+            $this->logActivity(null, null, 'validation', 'failure', 'License key not found');
             $this->sendError('Invalid license key', 404);
         }
         
@@ -101,10 +121,16 @@ class LicenseAPI {
             $this->sendError('License is ' . $license['status'], 403);
         }
         
+        // Verificar si la licencia está en su período válido
+        if ($license['current_period_status'] === 'pending') {
+            $this->logActivity($license['id'], null, 'validation', 'failure', 'License period has not started yet');
+            $this->sendError('License period has not started yet. Valid from: ' . date('Y-m-d H:i', strtotime($license['start_date'])), 403);
+        }
+        
         // Verificar expiración
-        if ($license['expires_at'] && strtotime($license['expires_at']) < time()) {
+        if ($license['period_status'] === 'expired') {
             $this->logActivity($license['id'], null, 'validation', 'failure', 'License expired');
-            $this->sendError('License has expired', 403);
+            $this->sendError('License has expired on: ' . date('Y-m-d H:i', strtotime($license['expires_at'])), 403);
         }
         
         // Verificar límite de dominios
@@ -133,11 +159,16 @@ class LicenseAPI {
             'license_info' => [
                 'id' => $license['id'],
                 'client_name' => $license['client_name'],
+                'client_phone' => $license['client_phone'],
                 'product_name' => $license['product_name'],
                 'version' => $license['version'],
                 'license_type' => $license['license_type'],
                 'max_domains' => $license['max_domains'],
+                'start_date' => $license['start_date'],
+                'duration_days' => $license['duration_days'],
                 'expires_at' => $license['expires_at'],
+                'period_status' => $license['period_status'],
+                'days_remaining' => $license['days_remaining'],
                 'current_activations' => $activations['count']
             ]
         ]);
@@ -156,8 +187,22 @@ class LicenseAPI {
         
         $domain = $this->cleanDomain($domain);
         
-        // Validar licencia primero
-        $stmt = $this->conn->prepare("SELECT * FROM licenses WHERE license_key = ? AND status = 'active'");
+        // Validar licencia primero con verificación de período
+        $stmt = $this->conn->prepare("
+            SELECT *, 
+                   CASE 
+                       WHEN expires_at IS NULL THEN 'permanent'
+                       WHEN expires_at > NOW() THEN 'valid'
+                       ELSE 'expired'
+                   END as period_status,
+                   CASE 
+                       WHEN start_date > NOW() THEN 'pending'
+                       WHEN start_date <= NOW() AND (expires_at IS NULL OR expires_at > NOW()) THEN 'active_period'
+                       ELSE 'expired_period'
+                   END as current_period_status
+            FROM licenses 
+            WHERE license_key = ? AND status = 'active'
+        ");
         $stmt->bind_param("s", $license_key);
         $stmt->execute();
         $license = $stmt->get_result()->fetch_assoc();
@@ -167,10 +212,16 @@ class LicenseAPI {
             $this->sendError('Invalid or inactive license key', 404);
         }
         
+        // Verificar si la licencia está en su período válido
+        if ($license['current_period_status'] === 'pending') {
+            $this->logActivity($license['id'], null, 'activation', 'failure', 'License period has not started yet');
+            $this->sendError('License period has not started yet. Valid from: ' . date('Y-m-d H:i', strtotime($license['start_date'])), 403);
+        }
+        
         // Verificar expiración
-        if ($license['expires_at'] && strtotime($license['expires_at']) < time()) {
+        if ($license['period_status'] === 'expired') {
             $this->logActivity($license['id'], null, 'activation', 'failure', 'Attempted activation of expired license');
-            $this->sendError('License has expired', 403);
+            $this->sendError('License has expired on: ' . date('Y-m-d H:i', strtotime($license['expires_at'])), 403);
         }
         
         // Verificar si ya está activado en este dominio
@@ -190,7 +241,14 @@ class LicenseAPI {
             $this->sendSuccess([
                 'activated' => true,
                 'message' => 'License reactivated successfully',
-                'activation_id' => $existing['id']
+                'activation_id' => $existing['id'],
+                'license_info' => [
+                    'client_name' => $license['client_name'],
+                    'client_phone' => $license['client_phone'],
+                    'expires_at' => $license['expires_at'],
+                    'days_remaining' => $license['period_status'] === 'valid' ? 
+                        (int)((strtotime($license['expires_at']) - time()) / (24 * 3600)) : null
+                ]
             ]);
         }
         
@@ -216,7 +274,14 @@ class LicenseAPI {
             $this->sendSuccess([
                 'activated' => true,
                 'message' => 'License activated successfully',
-                'activation_id' => $activation_id
+                'activation_id' => $activation_id,
+                'license_info' => [
+                    'client_name' => $license['client_name'],
+                    'client_phone' => $license['client_phone'],
+                    'expires_at' => $license['expires_at'],
+                    'days_remaining' => $license['period_status'] === 'valid' ? 
+                        (int)((strtotime($license['expires_at']) - time()) / (24 * 3600)) : null
+                ]
             ]);
         } else {
             $this->logActivity($license['id'], null, 'activation', 'failure', 'Database error during activation');
@@ -234,9 +299,24 @@ class LicenseAPI {
         
         $domain = $this->cleanDomain($domain);
         
-        // Buscar licencia y activación
+        // Buscar licencia y activación con información de período
         $stmt = $this->conn->prepare("
-            SELECT l.*, la.id as activation_id, la.status as activation_status, la.check_count
+            SELECT l.*, la.id as activation_id, la.status as activation_status, la.check_count,
+                   CASE 
+                       WHEN l.expires_at IS NULL THEN 'permanent'
+                       WHEN l.expires_at > NOW() THEN 'valid'
+                       ELSE 'expired'
+                   END as period_status,
+                   CASE 
+                       WHEN l.expires_at IS NOT NULL AND l.expires_at > NOW() 
+                       THEN DATEDIFF(l.expires_at, NOW()) 
+                       ELSE NULL 
+                   END as days_remaining,
+                   CASE 
+                       WHEN l.start_date > NOW() THEN 'pending'
+                       WHEN l.start_date <= NOW() AND (l.expires_at IS NULL OR l.expires_at > NOW()) THEN 'active_period'
+                       ELSE 'expired_period'
+                   END as current_period_status
             FROM licenses l
             LEFT JOIN license_activations la ON l.id = la.license_id AND la.domain = ?
             WHERE l.license_key = ?
@@ -264,8 +344,14 @@ class LicenseAPI {
             $this->sendError('License not activated for this domain', 403);
         }
         
+        // Verificar si la licencia está en su período válido
+        if ($license['current_period_status'] === 'pending') {
+            $this->logActivity($license['id'], $license['activation_id'], 'verification', 'failure', 'License period has not started yet');
+            $this->sendError('License period has not started yet', 403);
+        }
+        
         // Verificar expiración
-        if ($license['expires_at'] && strtotime($license['expires_at']) < time()) {
+        if ($license['period_status'] === 'expired') {
             $this->logActivity($license['id'], $license['activation_id'], 'verification', 'failure', 'License expired');
             $this->sendError('License has expired', 403);
         }
@@ -280,9 +366,90 @@ class LicenseAPI {
         $this->sendSuccess([
             'valid' => true,
             'license_status' => $license['status'],
+            'period_status' => $license['period_status'],
+            'start_date' => $license['start_date'],
             'expires_at' => $license['expires_at'],
+            'days_remaining' => $license['days_remaining'],
             'check_count' => $license['check_count'] + 1,
-            'next_check' => date('Y-m-d H:i:s', time() + (24 * 3600)) // 24 horas
+            'next_check' => date('Y-m-d H:i:s', time() + (24 * 3600)), // 24 horas
+            'client_info' => [
+                'name' => $license['client_name'],
+                'phone' => $license['client_phone']
+            ]
+        ]);
+    }
+    
+    private function getLicenseInfo() {
+        $license_key = $this->getParam('license_key');
+        
+        if (!$license_key) {
+            $this->sendError('Missing required parameter: license_key', 400);
+        }
+        
+        // Obtener información completa de la licencia
+        $stmt = $this->conn->prepare("
+            SELECT *, 
+                   CASE 
+                       WHEN expires_at IS NULL THEN 'permanent'
+                       WHEN expires_at > NOW() THEN 'valid'
+                       ELSE 'expired'
+                   END as period_status,
+                   CASE 
+                       WHEN expires_at IS NOT NULL AND expires_at > NOW() 
+                       THEN DATEDIFF(expires_at, NOW()) 
+                       ELSE NULL 
+                   END as days_remaining,
+                   CASE 
+                       WHEN start_date > NOW() THEN 'pending'
+                       WHEN start_date <= NOW() AND (expires_at IS NULL OR expires_at > NOW()) THEN 'active_period'
+                       ELSE 'expired_period'
+                   END as current_period_status
+            FROM licenses 
+            WHERE license_key = ?
+        ");
+        $stmt->bind_param("s", $license_key);
+        $stmt->execute();
+        $license = $stmt->get_result()->fetch_assoc();
+        
+        if (!$license) {
+            $this->sendError('License not found', 404);
+        }
+        
+        // Obtener activaciones
+        $stmt = $this->conn->prepare("
+            SELECT domain, ip_address, status, activated_at, last_check, check_count 
+            FROM license_activations 
+            WHERE license_id = ? 
+            ORDER BY activated_at DESC
+        ");
+        $stmt->bind_param("i", $license['id']);
+        $stmt->execute();
+        $activations = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        
+        $this->sendSuccess([
+            'license_info' => [
+                'id' => $license['id'],
+                'license_key' => $license['license_key'],
+                'client_name' => $license['client_name'],
+                'client_email' => $license['client_email'],
+                'client_phone' => $license['client_phone'],
+                'product_name' => $license['product_name'],
+                'version' => $license['version'],
+                'license_type' => $license['license_type'],
+                'max_domains' => $license['max_domains'],
+                'status' => $license['status'],
+                'start_date' => $license['start_date'],
+                'duration_days' => $license['duration_days'],
+                'expires_at' => $license['expires_at'],
+                'period_status' => $license['period_status'],
+                'current_period_status' => $license['current_period_status'],
+                'days_remaining' => $license['days_remaining'],
+                'created_at' => $license['created_at'],
+                'notes' => $license['notes']
+            ],
+            'activations' => $activations,
+            'total_activations' => count($activations),
+            'active_activations' => count(array_filter($activations, function($a) { return $a['status'] === 'active'; }))
         ]);
     }
     
@@ -298,7 +465,7 @@ class LicenseAPI {
         
         // Buscar activación
         $stmt = $this->conn->prepare("
-            SELECT la.id, l.id as license_id
+            SELECT la.id, l.id as license_id, l.client_name, l.client_phone
             FROM license_activations la
             JOIN licenses l ON la.license_id = l.id
             WHERE l.license_key = ? AND la.domain = ? AND la.status = 'active'
@@ -317,18 +484,48 @@ class LicenseAPI {
         
         if ($stmt->execute()) {
             $this->logActivity($result['license_id'], $result['id'], 'deactivation', 'success', 'License deactivated for domain: ' . $domain);
-            $this->sendSuccess(['deactivated' => true]);
+            $this->sendSuccess([
+                'deactivated' => true,
+                'message' => 'License deactivated successfully',
+                'client_info' => [
+                    'name' => $result['client_name'],
+                    'phone' => $result['client_phone']
+                ]
+            ]);
         } else {
             $this->sendError('Deactivation failed', 500);
         }
     }
     
     private function getStatus() {
+        // Obtener estadísticas del servidor
+        $stmt = $this->conn->query("
+            SELECT 
+                COUNT(*) as total_licenses,
+                COUNT(CASE WHEN status = 'active' THEN 1 END) as active_licenses,
+                COUNT(CASE WHEN expires_at IS NOT NULL AND expires_at < NOW() THEN 1 END) as expired_licenses
+            FROM licenses
+        ");
+        $stats = $stmt->fetch_assoc();
+        
+        $stmt = $this->conn->query("
+            SELECT COUNT(*) as total_activations 
+            FROM license_activations 
+            WHERE status = 'active'
+        ");
+        $activations = $stmt->fetch_assoc();
+        
         $this->sendSuccess([
             'api_version' => $this->api_version,
             'status' => 'online',
             'timestamp' => date('Y-m-d H:i:s'),
-            'server_time' => time()
+            'server_time' => time(),
+            'server_stats' => [
+                'total_licenses' => (int)$stats['total_licenses'],
+                'active_licenses' => (int)$stats['active_licenses'],
+                'expired_licenses' => (int)$stats['expired_licenses'],
+                'total_activations' => (int)$activations['total_activations']
+            ]
         ]);
     }
     
